@@ -8,10 +8,13 @@ from npids import Lookup
 import pyterrier_alpha as pta
 
 class QualCache(pta.Artifact, pt.Indexer):
-  def __init__(self, path):
+  def __init__(self, path, zscore=False, shift=0.0, scale=1.0):
     super().__init__(path)
     self._quality_scores = None
     self._docnos = None
+    self.zscore = zscore
+    self.shift = shift
+    self.scale = scale
 
   def index(self, it):
     return self.indexer().index(it)
@@ -30,8 +33,28 @@ class QualCache(pta.Artifact, pt.Indexer):
 
   def quality_scores(self):
     if self._quality_scores is None:
-      self._quality_scores = np.memmap(os.path.join(self.path, 'quality.f4'), dtype='f4', mode='r')
-    return self._quality_scores
+        self._quality_scores = np.memmap(
+            os.path.join(self.path, 'quality.f4'),
+            dtype='f4',
+            mode='r'
+        )
+
+    scores = self._quality_scores.astype(np.float32)
+
+    # Fix NaNs
+    if np.isnan(scores).any():
+        print("Warning: NaN values found. Replacing with minimum value.")
+        min_val = np.nanmin(scores)
+        scores = np.where(np.isnan(scores), min_val, scores)
+
+    if self.zscore:
+      mean = np.mean(scores)
+      std = np.std(scores)
+      if std > 0:
+          scores = (scores - mean) / std
+      scores = scores * self.scale + self.shift
+    
+    return scores
 
   def docnos(self):
     if self._docnos is None:
@@ -39,7 +62,12 @@ class QualCache(pta.Artifact, pt.Indexer):
     return self._docnos
 
   def quantile(self, p):
-    return np.quantile(self.quality_scores(), p)
+    scores = self.quality_scores()
+    if np.isnan(scores).any():
+      print("Warning: NaN values found in quality scores. Finding the minimum value to replace them.")
+      min_val = np.nanmin(scores)
+      scores = np.where(np.isnan(scores), min_val, scores)      
+    return np.quantile(scores, p)
 
   def iter_quantiles(self):
     c = len(self.quality_scores())
