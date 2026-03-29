@@ -54,10 +54,14 @@ class QualT5(pt.Transformer):
             enc['decoder_input_ids'] = dec_ids[:len(texts[rng])]
             if scores:
               scores[-1] = scores[-1].cpu().detach().tolist()
-            with torch.no_grad(), torch.autocast(device_type=self.device.type):
-                result = self.model(**enc).logits
-                result = result[:, 0]
+            with torch.no_grad():
+                out = self.model(**enc)
+                logit = out.logits
+                result = logit[:, 0]
                 scores.append(F.log_softmax(result, dim=1)[:, 0])
+
+        if torch.isnan(scores[-1]).any():
+            print("Warning: NaN values found in scores. Replacing with -inf.")
         if scores:
           scores[-1] = scores[-1].cpu().detach().tolist()
         scores = list(itertools.chain.from_iterable(scores))
